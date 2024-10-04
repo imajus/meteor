@@ -61,7 +61,8 @@ var packageJson = {
     'lru-cache': '4.1.5',
     "anser": "2.0.1",
     'xmlbuilder2': '1.8.1',
-    "ws": "7.4.5"
+    "ws": "7.4.5",
+    "resolve.exports": "2.0.2",
   }
 };
 
