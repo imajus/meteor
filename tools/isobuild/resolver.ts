@@ -2,8 +2,9 @@ import {
   isString,
   isObject,
   has,
+  pick,
 } from "underscore";
-
+import * as resolve from "resolve.exports";
 import { matches as archMatches, isLegacyArch } from "../utils/archinfo";
 import {
   pathJoin,
@@ -231,7 +232,7 @@ export default class Resolver {
         resolved.packageJsonMap![pkgJsonInfo.path] = pkgJsonInfo.pkg;
       }
 
-      resolved.id = convertToPosixPath(
+      resolved.id ??= convertToPosixPath(
         convertToOSPath(resolved.path),
         true
       );
@@ -329,6 +330,29 @@ export default class Resolver {
         dir = pathDirname(dir);
       }
 
+      const fullPath = pathJoin(dir, "node_modules", id);
+      const pkgJsonInfo = this.findPkgJsonSubsetForPath(fullPath);
+      if (pkgJsonInfo && isObject(pkgJsonInfo.pkg.exports)) {
+        // Handle "exports" mapping if it's present
+        const { name: pkgName } = pkgJsonInfo.pkg;
+        const subPath = id.substring(pkgName.length);
+        const targetBrowser = ['web', 'web.browser.legacy'].includes(this.targetArch);
+        const resolvedPaths = resolve.exports(pkgJsonInfo.pkg, `.${subPath}`, {
+          require: true,
+          browser: targetBrowser,
+        });
+        if (resolvedPaths) {
+          //TODO: Handle potentially multiple mappings
+          const [firstPath] = resolvedPaths;
+          resolved = this.joinAndStat(dir, "node_modules", pkgName, firstPath);
+          if (resolved) {
+            resolved.id = convertToPosixPath(convertToOSPath(fullPath), true);
+            resolved.packageJsonMap = { [pkgJsonInfo.path]: pkgJsonInfo.pkg };
+          }
+        }
+      }
+
+      if (!resolved) {
       while (! (resolved = this.joinAndStat(dir, "node_modules", id))) {
         if (dir === sourceRoot) {
           break;
@@ -341,6 +365,7 @@ export default class Resolver {
         }
 
         dir = parentDir;
+        }
       }
     }
 
@@ -370,29 +395,12 @@ export default class Resolver {
       return null;
     }
 
-    // Output a JS module that exports just the "name", "version", "main",
-    // and "browser" properties (if defined) from the package.json file.
-    const pkgSubset: Partial<typeof pkg> = {};
-
-    if (has(pkg, "name")) {
-      pkgSubset.name = pkg.name;
-    }
-
-    if (has(pkg, "version")) {
-      pkgSubset.version = pkg.version;
-    }
-
-    this.mainFields.forEach(name => {
-      const value = pkg[name];
-      if (isString(value) ||
-          isObject(value)) {
-        pkgSubset[name] = value;
-      }
-    });
+    // Output a JS module that exports just the "name", "version", "main", "browser" and "export" properties
+    // from the package.json file.
 
     return {
       path: pkgJsonPath,
-      pkg: pkgSubset,
+      pkg: pick(pkg, 'name', 'version', 'exports', ...this.mainFields),
     };
   }
 
